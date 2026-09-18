@@ -1,0 +1,89 @@
+# =====================================================
+# PATH & ENV
+# =====================================================
+export ZSH="$HOME/.oh-my-zsh"
+export EDITOR=nvim
+export PATH="$PATH:$HOME/.cargo/bin:$HOME/.local/bin"
+
+# =====================================================
+# History
+# =====================================================
+HISTFILE=~/.zsh_history
+HISTSIZE=10000
+SAVEHIST=10000
+setopt appendhistory
+setopt sharehistory
+setopt hist_ignore_all_dups
+setopt hist_ignore_space
+
+# =====================================================
+# Oh My Zsh
+# =====================================================
+ZSH_THEME=""   # oh-my-posh kullanıyoruz, tema boş kalsın
+plugins=(
+    git
+    sudo
+    web-search
+    archlinux
+    zsh-autosuggestions
+    zsh-syntax-highlighting
+    copyfile
+    copybuffer
+    dirhistory
+)
+source $ZSH/oh-my-zsh.sh
+
+# =====================================================
+# Ek pluginler (OMZ'den sonra yüklenmeli)
+# =====================================================
+# fzf key bindings (güvenli yol)
+[[ -f /usr/share/fzf/key-bindings.zsh ]] && source /usr/share/fzf/key-bindings.zsh
+[[ -f /usr/share/fzf/completion.zsh ]] && source /usr/share/fzf/completion.zsh
+
+# zsh-autocomplete (autosuggestions ile çakışabilir, dikkat)
+[[ -f /usr/share/zsh/plugins/zsh-autocomplete/zsh-autocomplete.plugin.zsh ]] \
+    && source /usr/share/zsh/plugins/zsh-autocomplete/zsh-autocomplete.plugin.zsh
+
+# =====================================================
+# Oh My Posh
+# =====================================================
+if command -v oh-my-posh >/dev/null 2>&1; then
+    OMP_CONFIG="$HOME/.config/ohmyposh/zen.toml"
+    if [[ -f "$OMP_CONFIG" ]]; then
+        eval "$(oh-my-posh init zsh --config "$OMP_CONFIG")"
+    else
+        # config yoksa default tema ile başlat
+        eval "$(oh-my-posh init zsh)"
+    fi
+fi
+
+# =====================================================
+# Aliases
+# =====================================================
+alias c='clear'
+alias ff='fastfetch'
+alias ls='eza -a --icons=always'
+alias ll='eza -al --icons=always'
+alias lt='eza -a --tree --level=1 --icons=always'
+alias shutdown='systemctl poweroff'
+alias wifi='nmtui'
+alias fuzzy='fzf --preview="cat {}" | xargs -r nvim'
+alias git-keygen='ssh-keygen -t ed25519 -C "$(git config user.email)"'
+alias desk='cd ~/Desktop'
+alias Qtile='startx'
+
+# System
+alias update-grub='sudo grub-mkconfig -o /boot/grub/grub.cfg'
+
+# Qtile (xrandr)
+alias res1='xrandr --output DisplayPort-0 --mode 2560x1440 --rate 120'
+alias res2='xrandr --output DisplayPort-0 --mode 1920x1080 --rate 120'
+alias setkb='setxkbmap de; echo "Keyboard set back to de."'
+
+
+# bun completions
+[ -s "$HOME/.bun/_bun" ] && source "$HOME/.bun/_bun"
+
+# bun
+export BUN_INSTALL="$HOME/.bun"
+export PATH="$BUN_INSTALL/bin:$PATH"

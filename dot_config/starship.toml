@@ -1,0 +1,53 @@
+# Beyaz + siyah starship prompt
+
+format = """
+[](fg:#ffffff)\
+$os\
+$username\
+[](fg:#1f1f1f bg:#ffffff)\
+$directory\
+[](fg:#1f1f1f)\
+$git_branch\
+$git_status\
+$cmd_duration\
+$line_break\
+$character"""
+
+[os]
+disabled = false
+style = "bg:#ffffff fg:#000000"
+format = "[ $symbol ]($style)"
+
+[os.symbols]
+CachyOS = "\uf120 "
+
+[username]
+show_always = true
+style_user = "bg:#ffffff fg:#000000"
+style_root = "bg:#ff6b6b fg:#000000"
+format = "[ $user ]($style)"
+
+[directory]
+style = "bg:#1f1f1f fg:#ffffff"
+format = "[ $path ]($style)"
+truncation_length = 3
+truncate_to_repo = true
+
+[git_branch]
+symbol = " "
+style = "bg:#1f1f1f fg:#ffffff"
+format = "[ $symbol $branch ]($style)"
+
+[git_status]
+style = "bg:#1f1f1f fg:#ffffff"
+format = "[ ($all_status$ahead_behind )]($style)"
+
+[cmd_duration]
+min_time = 1000
+style = "fg:#ffffff"
+format = "took [$duration]($style) "
+
+[character]
+success_symbol = "[❯](bold #ffffff)"
+error_symbol = "[❯](bold #ff6b6b)"
+vimcmd_symbol = "[❮](bold #ffffff)"
