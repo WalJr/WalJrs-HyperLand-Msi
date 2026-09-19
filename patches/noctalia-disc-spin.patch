@@ -1,0 +1,72 @@
+diff --git a/src/shell/osd/osd_overlay.cpp b/src/shell/osd/osd_overlay.cpp
+index 9a4083c..d188573 100644
+--- a/src/shell/osd/osd_overlay.cpp
++++ b/src/shell/osd/osd_overlay.cpp
+@@ -729,6 +729,18 @@ void OsdOverlay::updateInstanceContent(Instance& inst) {
+                                                    : ColorRole::Primary;
+   inst.glyph->setGlyph(m_content.icon);
+   inst.glyph->setColor(colorSpecFromRole(accentRole));
++
++  // Dönen CD: medya OSD'sindeki simge sürekli döner (yerel yama).
++  if (m_content.kind == OsdKind::Media) {
++    if (inst.spinAnimId == 0) {
++      startGlyphSpin(inst);
++    }
++  } else if (inst.spinAnimId != 0) {
++    inst.animations.cancel(inst.spinAnimId);
++    inst.spinAnimId = 0;
++    inst.glyph->setRotation(0.0F);
++  }
++
+   inst.progress->setVisible(m_content.showProgress);
+   inst.progress->setFill(colorSpecFromRole(accentRole));
+   inst.progress->setOrientation(vertical ? ProgressBarOrientation::Vertical : ProgressBarOrientation::Horizontal);
+@@ -839,6 +851,28 @@ void OsdOverlay::applyReveal(Instance& inst, float reveal) {
+   }
+ }
+ 
++void OsdOverlay::startGlyphSpin(Instance& inst) {
++  if (inst.glyph == nullptr) {
++    return;
++  }
++  constexpr float kSpinDurationMs = 2800.0F;
++  constexpr float kTwoPi = 6.28318530718F;
++  // animateTimer: küresel animasyon hızı/azaltma ayarlarından bağımsız çalışır.
++  inst.spinAnimId = inst.animations.animateTimer(
++      0.0F, kTwoPi, kSpinDurationMs, Easing::Linear,
++      [&inst](float v) {
++        if (inst.glyph != nullptr) {
++          inst.glyph->setRotation(v);
++        }
++      },
++      [this, &inst]() {
++        inst.spinAnimId = 0;
++        startGlyphSpin(inst);
++      },
++      inst.glyph
++  );
++}
++
+ void OsdOverlay::animateInstance(Instance& inst) {
+   if (inst.sceneRoot == nullptr) {
+     return;
+diff --git a/src/shell/osd/osd_overlay.h b/src/shell/osd/osd_overlay.h
+index 505bdf4..25997f4 100644
+--- a/src/shell/osd/osd_overlay.h
++++ b/src/shell/osd/osd_overlay.h
+@@ -99,6 +99,7 @@ private:
+     float rowBaseY = 0.0F;
+     AnimationManager::Id showAnimId = 0;
+     AnimationManager::Id hideAnimId = 0;
++    AnimationManager::Id spinAnimId = 0;
+     bool showPending = false;
+     bool visible = false;
+     float appliedCornerRadiusScale = -1.0F;
+@@ -116,6 +117,7 @@ private:
+   void updateBlurRegion(Instance& inst) const;
+   void applyReveal(Instance& inst, float reveal);
+   void animateInstance(Instance& inst);
++  void startGlyphSpin(Instance& inst);
+ 
+   WaylandConnection* m_wayland = nullptr;
+   ConfigService* m_config = nullptr;
