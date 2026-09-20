@@ -112,7 +112,7 @@ color = "secondary"
 
 [widget.media]
 hide_when_no_media = true
-title_scroll = "on_hover"
+title_scroll = "always"
 
 [widget.network]
 color = "secondary"
