@@ -1,0 +1,547 @@
+diff --git a/src/shell/bar/widgets/tray_widget.cpp b/src/shell/bar/widgets/tray_widget.cpp
+index 568aae8..eb14f2c 100644
+--- a/src/shell/bar/widgets/tray_widget.cpp
++++ b/src/shell/bar/widgets/tray_widget.cpp
+@@ -20,6 +20,7 @@
+ #include "util/string_utils.h"
+ 
+ #include <algorithm>
++#include <chrono>
+ #include <cmath>
+ #include <filesystem>
+ #include <linux/input-event-codes.h>
+@@ -33,6 +34,9 @@ namespace {
+ 
+   constexpr Logger kLog("tray");
+ 
++  // Hovering the drawer button opens the panel after this short dwell.
++  constexpr auto kDrawerHoverOpenDelay = std::chrono::milliseconds(140);
++
+   using tray::identifierVariants;
+ 
+   void addIconAlias(std::unordered_map<std::string, std::string>& index, std::string_view key, std::string_view icon) {
+@@ -445,6 +449,10 @@ void TrayWidget::rebuild(Renderer& renderer) {
+     return;
+   }
+ 
++  // The hover trigger (and its pending open timer) belong to the previous
++  // scene graph; drop the timer before the node is destroyed.
++  m_drawerHoverTimer.stop();
++
+   for (auto* image : m_loadedImages) {
+     if (image != nullptr) {
+       image->clear(renderer);
+@@ -459,76 +467,85 @@ void TrayWidget::rebuild(Renderer& renderer) {
+     m_container->removeChild(m_container->children().back().get());
+   }
+ 
+-  auto attachHover = [this](InputArea& area, float size) {
+-    if (!barCapsuleSpec().hoverHighlight) {
+-      return;
+-    }
+-
++  auto attachHover = [this](
++                         InputArea& area, float size, std::function<void()> extraEnter = {},
++                         std::function<void()> extraLeave = {}
++                     ) {
++    const bool highlight = barCapsuleSpec().hoverHighlight;
+     Box* hoverBoxPtr = nullptr;
+-    ColorSpec hoverFill = widgetForegroundOr(colorSpecFromRole(ColorRole::OnSurface));
+-    hoverFill.alpha = 0.0F;
+-    const float padding = barCapsuleSpec().padding * m_contentScale;
+-    const float boxSize = size + padding * 2.0F;
+-
+-    auto hoverBox = ui::box({
+-        .out = &hoverBoxPtr,
+-        .fill = hoverFill,
+-        .radius = resolvedBarCapsuleRadius(boxSize, boxSize),
+-        .width = boxSize,
+-        .height = boxSize,
+-        .configure = [](Box& box) {
+-          box.setZIndex(-1);
+-          box.setHitTestVisible(false);
+-        },
+-    });
++    auto progress = std::make_shared<float>(0.0F);
+ 
+-    if (m_hoverOverlayParent != nullptr) {
+-      m_hoverOverlayParent->addChild(std::move(hoverBox));
+-      m_hoverOverlays.push_back({.area = &area, .box = hoverBoxPtr, .padding = padding});
+-    } else {
+-      hoverBoxPtr->setPosition(-padding, -padding);
+-      area.addChild(std::move(hoverBox));
++    if (highlight) {
++      ColorSpec hoverFill = widgetForegroundOr(colorSpecFromRole(ColorRole::OnSurface));
++      hoverFill.alpha = 0.0F;
++      const float padding = barCapsuleSpec().padding * m_contentScale;
++      const float boxSize = size + padding * 2.0F;
++
++      auto hoverBox = ui::box({
++          .out = &hoverBoxPtr,
++          .fill = hoverFill,
++          .radius = resolvedBarCapsuleRadius(boxSize, boxSize),
++          .width = boxSize,
++          .height = boxSize,
++          .configure = [](Box& box) {
++            box.setZIndex(-1);
++            box.setHitTestVisible(false);
++          },
++      });
++
++      if (m_hoverOverlayParent != nullptr) {
++        m_hoverOverlayParent->addChild(std::move(hoverBox));
++        m_hoverOverlays.push_back({.area = &area, .box = hoverBoxPtr, .padding = padding});
++      } else {
++        hoverBoxPtr->setPosition(-padding, -padding);
++        area.addChild(std::move(hoverBox));
++      }
+     }
+ 
+-    auto progress = std::make_shared<float>(0.0F);
+-    area.setOnEnter([this, hoverBoxPtr, progress](const InputArea::PointerData&) {
+-      if (m_animations == nullptr)
+-        return;
+-      m_animations->cancelForOwner(hoverBoxPtr);
+-      const ColorSpec fill = widgetForegroundOr(colorSpecFromRole(ColorRole::OnSurface));
+-      m_animations->animate(
+-          *progress, 1.0F, Style::animFast, Easing::EaseOutCubic,
+-          [this, hoverBoxPtr, fill, progress](float p) {
+-            *progress = p;
+-            hoverBoxPtr->setVisible(p > 0.001F);
+-            ColorSpec c = fill;
+-            c.alpha = 0.1F * p;
+-            hoverBoxPtr->setFill(c);
+-            requestRedraw();
+-          },
+-          {}, hoverBoxPtr
+-      );
+-      requestFrameTick();
++    area.setOnEnter([this, hoverBoxPtr, progress, extraEnter](const InputArea::PointerData&) {
++      if (m_animations != nullptr && hoverBoxPtr != nullptr) {
++        m_animations->cancelForOwner(hoverBoxPtr);
++        const ColorSpec fill = widgetForegroundOr(colorSpecFromRole(ColorRole::OnSurface));
++        m_animations->animate(
++            *progress, 1.0F, Style::animFast, Easing::EaseOutCubic,
++            [this, hoverBoxPtr, fill, progress](float p) {
++              *progress = p;
++              hoverBoxPtr->setVisible(p > 0.001F);
++              ColorSpec c = fill;
++              c.alpha = 0.1F * p;
++              hoverBoxPtr->setFill(c);
++              requestRedraw();
++            },
++            {}, hoverBoxPtr
++        );
++        requestFrameTick();
++      }
++      if (extraEnter) {
++        extraEnter();
++      }
+     });
+ 
+-    area.setOnLeave([this, hoverBoxPtr, progress]() {
+-      if (m_animations == nullptr)
+-        return;
+-      m_animations->cancelForOwner(hoverBoxPtr);
+-      const ColorSpec fill = widgetForegroundOr(colorSpecFromRole(ColorRole::OnSurface));
+-      m_animations->animate(
+-          *progress, 0.0F, Style::animFast, Easing::EaseOutCubic,
+-          [this, hoverBoxPtr, fill, progress](float p) {
+-            *progress = p;
+-            hoverBoxPtr->setVisible(p > 0.001F);
+-            ColorSpec c = fill;
+-            c.alpha = 0.1F * p;
+-            hoverBoxPtr->setFill(c);
+-            requestRedraw();
+-          },
+-          {}, hoverBoxPtr
+-      );
+-      requestFrameTick();
++    area.setOnLeave([this, hoverBoxPtr, progress, extraLeave]() {
++      if (m_animations != nullptr && hoverBoxPtr != nullptr) {
++        m_animations->cancelForOwner(hoverBoxPtr);
++        const ColorSpec fill = widgetForegroundOr(colorSpecFromRole(ColorRole::OnSurface));
++        m_animations->animate(
++            *progress, 0.0F, Style::animFast, Easing::EaseOutCubic,
++            [this, hoverBoxPtr, fill, progress](float p) {
++              *progress = p;
++              hoverBoxPtr->setVisible(p > 0.001F);
++              ColorSpec c = fill;
++              c.alpha = 0.1F * p;
++              hoverBoxPtr->setFill(c);
++              requestRedraw();
++            },
++            {}, hoverBoxPtr
++        );
++        requestFrameTick();
++      }
++      if (extraLeave) {
++        extraLeave();
++      }
+     });
+   };
+ 
+@@ -550,26 +567,33 @@ void TrayWidget::rebuild(Renderer& renderer) {
+       auto* triggerPtr = triggerArea.get();
+       m_drawerTrigger = triggerPtr;
+       triggerArea->setSize(itemSize, itemSize);
+-      triggerArea->setOnClick([this, triggerPtr](const InputArea::PointerData& data) {
++      auto openDrawer = [this, triggerPtr](PanelActivation activation, std::string_view context) {
++        if (triggerPtr == nullptr) {
++          return;
++        }
++        float ax = 0.0F;
++        float ay = 0.0F;
++        Node::absolutePosition(triggerPtr, ax, ay);
++        // Open below / away from the bar edge relative to the tray button center.
++        const float centerX = ax + triggerPtr->width() * 0.5F;
++        const float centerY = ay + triggerPtr->height() * 0.5F;
++        float anchorX = centerX;
++        float anchorY = centerY;
++        if (m_barPosition == "top") {
++          anchorY += triggerPtr->height() * 0.5F + Style::spaceXs * m_contentScale;
++        } else if (m_barPosition == "bottom") {
++          anchorY -= triggerPtr->height() * 0.5F + Style::spaceXs * m_contentScale;
++        } else if (m_barPosition == "left") {
++          anchorX += triggerPtr->width() * 0.5F + Style::spaceXs * m_contentScale;
++        } else if (m_barPosition == "right") {
++          anchorX -= triggerPtr->width() * 0.5F + Style::spaceXs * m_contentScale;
++        }
++        requestPanelToggle("tray-drawer", context, anchorX, anchorY, activation);
++      };
++      triggerArea->setOnClick([this, openDrawer](const InputArea::PointerData& data) {
+         if (data.button == BTN_LEFT) {
+-          float ax = 0.0F;
+-          float ay = 0.0F;
+-          Node::absolutePosition(triggerPtr, ax, ay);
+-          // Open below / away from the bar edge relative to the tray button center.
+-          const float centerX = ax + triggerPtr->width() * 0.5F;
+-          const float centerY = ay + triggerPtr->height() * 0.5F;
+-          float anchorX = centerX;
+-          float anchorY = centerY;
+-          if (m_barPosition == "top") {
+-            anchorY += triggerPtr->height() * 0.5F + Style::spaceXs * m_contentScale;
+-          } else if (m_barPosition == "bottom") {
+-            anchorY -= triggerPtr->height() * 0.5F + Style::spaceXs * m_contentScale;
+-          } else if (m_barPosition == "left") {
+-            anchorX += triggerPtr->width() * 0.5F + Style::spaceXs * m_contentScale;
+-          } else if (m_barPosition == "right") {
+-            anchorX -= triggerPtr->width() * 0.5F + Style::spaceXs * m_contentScale;
+-          }
+-          requestPanelToggle("tray-drawer", {}, anchorX, anchorY);
++          m_drawerHoverTimer.stop();
++          openDrawer(PanelActivation::Toggle, {});
+         }
+       });
+       const bool panelOpen = PanelManager::instance().isOpenPanel("tray-drawer");
+@@ -585,7 +609,28 @@ void TrayWidget::rebuild(Renderer& renderer) {
+       );
+       m_drawerChevron = glyph.get();
+       triggerArea->addChild(std::move(glyph));
+-      attachHover(*triggerArea, itemSize);
++      attachHover(
++          *triggerArea, itemSize,
++          [this, openDrawer]() {
++            kLog.debug("tray drawer: hover enter");
++            PanelManager::instance().setHoverTriggerHovered(true);
++            if (PanelManager::instance().isOpenPanel("tray-drawer")) {
++              return;
++            }
++            m_drawerHoverTimer.stop();
++            m_drawerHoverTimer.start(kDrawerHoverOpenDelay, [this, openDrawer]() {
++              kLog.debug("tray drawer: hover open");
++              if (!PanelManager::instance().isOpenPanel("tray-drawer")) {
++                openDrawer(PanelActivation::Open, "hover");
++              }
++            });
++          },
++          [this]() {
++            kLog.debug("tray drawer: hover leave");
++            m_drawerHoverTimer.stop();
++            PanelManager::instance().setHoverTriggerHovered(false);
++          }
++      );
+       m_container->addChild(std::move(triggerArea));
+     }
+   }
+diff --git a/src/shell/bar/widgets/tray_widget.h b/src/shell/bar/widgets/tray_widget.h
+index 20fd7be..4d08e85 100644
+--- a/src/shell/bar/widgets/tray_widget.h
++++ b/src/shell/bar/widgets/tray_widget.h
+@@ -1,5 +1,6 @@
+ #pragma once
+ 
++#include "core/timer_manager.h"
+ #include "dbus/tray/tray_service.h"
+ #include "shell/bar/widget.h"
+ #include "system/icon_resolver.h"
+@@ -105,6 +106,7 @@ private:
+   InputArea* m_drawerTrigger = nullptr;
+   Glyph* m_drawerChevron = nullptr;
+   std::string m_drawerChevronGlyph;
++  Timer m_drawerHoverTimer;
+   Signal<>::ScopedConnection m_paletteConn;
+   Signal<>::ScopedConnection m_appIconColorizeConn;
+   Node* m_hoverOverlayParent = nullptr;
+diff --git a/src/shell/panel/panel_manager.cpp b/src/shell/panel/panel_manager.cpp
+index 72c65b8..a57a533 100644
+--- a/src/shell/panel/panel_manager.cpp
++++ b/src/shell/panel/panel_manager.cpp
+@@ -1337,6 +1337,7 @@ void PanelManager::closePanel(bool animateClose) {
+   // Drop the outside-click handlers as soon as close starts.
+   // During the close animation we want clicks on apps to behave normally.
+   deactivateOutsideClickHandlers();
++  m_hoverDismissTimer.stop();
+ 
+   // Disable input during close animation
+   m_inputDispatcher.setSceneRoot(nullptr);
+@@ -1380,6 +1381,74 @@ void PanelManager::closePanel(bool animateClose) {
+   }
+ }
+ 
++void PanelManager::setHoverDismiss(bool enabled) {
++  m_hoverDismissEnabled = enabled;
++  if (!enabled) {
++    m_hoverDismissTimer.stop();
++    m_panelHovered = false;
++    m_triggerHovered = false;
++  }
++}
++
++void PanelManager::setHoverTriggerHovered(bool hovered) {
++  m_triggerHovered = hovered;
++  if (hovered) {
++    cancelHoverDismiss();
++  } else {
++    armHoverDismiss();
++  }
++}
++
++bool PanelManager::panelSurfaceContains(float sx, float sy) const {
++  if (m_surface == nullptr) {
++    return false;
++  }
++  const float w = static_cast<float>(m_surface->width());
++  const float h = static_cast<float>(m_surface->height());
++  if (w <= 0.0F || h <= 0.0F) {
++    return false;
++  }
++  return sx >= 0.0F && sy >= 0.0F && sx <= w && sy <= h;
++}
++
++void PanelManager::applyPanelEnterHover(float sx, float sy) {
++  const bool inside = panelSurfaceContains(sx, sy);
++  m_pointerInside = inside;
++  // (0,0) is what the focus grab uses for a synthetic enter, so require the
++  // coordinates to be strictly inside the panel before trusting the enter.
++  if (inside && sx > 0.0F && sy > 0.0F) {
++    m_panelHovered = true;
++    cancelHoverDismiss();
++  }
++}
++
++void PanelManager::applyPanelMotionHover(float sx, float sy) {
++  const bool inside = panelSurfaceContains(sx, sy);
++  m_pointerInside = inside;
++  m_panelHovered = inside;
++  if (inside) {
++    cancelHoverDismiss();
++  } else {
++    armHoverDismiss();
++  }
++}
++
++void PanelManager::armHoverDismiss() {
++  if (!m_hoverDismissEnabled || !isOpen() || m_closing) {
++    return;
++  }
++  // Grace period: closing is deferred so the pointer can travel between the
++  // bar trigger and the panel body without dismissing it on the way.
++  m_hoverDismissTimer.start(std::chrono::milliseconds(250), [this]() {
++    if (m_hoverDismissEnabled && isOpen() && !m_closing && !m_panelHovered && !m_triggerHovered
++        && m_attachedPopupCount == 0) {
++      closePanel();
++    }
++  });
++}
++
++void PanelManager::cancelHoverDismiss() { m_hoverDismissTimer.stop(); }
++
+ void PanelManager::destroyPanel() {
+   if (m_attachedToBar && m_attachedPanelGeometryCallback && m_output != nullptr) {
+     m_attachedPanelGeometryCallback(m_output, m_sourceBarName, std::nullopt);
+@@ -1390,6 +1459,10 @@ void PanelManager::destroyPanel() {
+   m_animations.cancelAll();
+   m_closing = false;
+   m_pointerInside = false;
++  m_hoverDismissTimer.stop();
++  m_hoverDismissEnabled = false;
++  m_panelHovered = false;
++  m_triggerHovered = false;
+   m_attachedPopupCount = 0;
+   m_inputDispatcher.setSceneRoot(nullptr);
+   // Hover leave only fades tooltips asynchronously. Destroy them (and any
+@@ -1516,6 +1589,20 @@ bool PanelManager::onPointerEvent(const PointerEvent& event) {
+     return true;
+   }
+   if (!isOpen() || m_inTransition) {
++    // The panel surface can appear under a moving pointer while the open
++    // animation is still running, so keep hover-dismiss state accurate even
++    // though regular input stays suppressed until the transition settles.
++    if (event.surface == m_wlSurface) {
++      if (event.type == PointerEvent::Type::Enter) {
++        applyPanelEnterHover(static_cast<float>(event.sx), static_cast<float>(event.sy));
++      } else if (event.type == PointerEvent::Type::Leave) {
++        m_pointerInside = false;
++        m_panelHovered = false;
++        armHoverDismiss();
++      } else if (event.type == PointerEvent::Type::Motion) {
++        applyPanelMotionHover(static_cast<float>(event.sx), static_cast<float>(event.sy));
++      }
++    }
+     return false;
+   }
+ 
+@@ -1532,9 +1619,12 @@ bool PanelManager::onPointerEvent(const PointerEvent& event) {
+   if (m_attachedPopupCount > 0) {
+     if (event.surface == m_wlSurface) {
+       if (event.type == PointerEvent::Type::Enter) {
+-        m_pointerInside = true;
++        applyPanelEnterHover(static_cast<float>(event.sx), static_cast<float>(event.sy));
+       } else if (event.type == PointerEvent::Type::Leave) {
+         m_pointerInside = false;
++        m_panelHovered = false;
++      } else if (event.type == PointerEvent::Type::Motion) {
++        applyPanelMotionHover(static_cast<float>(event.sx), static_cast<float>(event.sy));
+       }
+     }
+     return false;
+@@ -1543,7 +1633,10 @@ bool PanelManager::onPointerEvent(const PointerEvent& event) {
+   switch (event.type) {
+   case PointerEvent::Type::Enter: {
+     if (event.surface == m_wlSurface) {
+-      m_pointerInside = true;
++      // A motion event always accompanies a real enter; the hover flag is only
++      // set when the enter coordinates actually land inside the panel because a
++      // synthetic enter may carry bogus (0,0) or out-of-bounds coordinates.
++      applyPanelEnterHover(static_cast<float>(event.sx), static_cast<float>(event.sy));
+       m_inputDispatcher.pointerEnter(static_cast<float>(event.sx), static_cast<float>(event.sy), event.serial);
+     }
+     break;
+@@ -1551,15 +1644,20 @@ bool PanelManager::onPointerEvent(const PointerEvent& event) {
+   case PointerEvent::Type::Leave: {
+     if (event.surface == m_wlSurface) {
+       m_pointerInside = false;
++      m_panelHovered = false;
+       m_inputDispatcher.pointerLeave();
++      armHoverDismiss();
+     }
+     break;
+   }
+   case PointerEvent::Type::Motion: {
+-    if (!m_pointerInside) {
+-      return false;
++    if (event.surface == m_wlSurface) {
++      // Hyprland's focus grab pins pointer focus to the panel, so moving onto a
++      // window shows up as motion with out-of-bounds local coordinates instead
++      // of a Leave event.
++      applyPanelMotionHover(static_cast<float>(event.sx), static_cast<float>(event.sy));
++      m_inputDispatcher.pointerMotion(static_cast<float>(event.sx), static_cast<float>(event.sy), 0);
+     }
+-    m_inputDispatcher.pointerMotion(static_cast<float>(event.sx), static_cast<float>(event.sy), 0);
+     break;
+   }
+   case PointerEvent::Type::Button: {
+@@ -1872,6 +1970,11 @@ void PanelManager::endAttachedPopup(wl_surface* surface) {
+   if (m_attachedPopupCount > 0) {
+     return;
+   }
++  // A tooltip popup may have blocked the hover dismiss; re-arm it now that the
++  // popup is gone and neither the panel nor its bar trigger is hovered.
++  if (m_hoverDismissEnabled && !m_panelHovered && !m_triggerHovered) {
++    armHoverDismiss();
++  }
+   m_pointerInside =
+       m_platform != nullptr && m_platform->hasPointerPosition() && m_platform->lastPointerSurface() == m_wlSurface;
+   if (m_pointerInside) {
+diff --git a/src/shell/panel/panel_manager.h b/src/shell/panel/panel_manager.h
+index b9b5c26..d1cdbc6 100644
+--- a/src/shell/panel/panel_manager.h
++++ b/src/shell/panel/panel_manager.h
+@@ -99,6 +99,13 @@ public:
+ 
+   void openPanel(const std::string& panelId, PanelOpenRequest request = {});
+   void closePanel(bool animateClose = true);
++  // Hover-dismiss mode: while enabled, the panel closes shortly after the pointer
++  // stops being over it (used by the tray drawer opened on hover).
++  void setHoverDismiss(bool enabled);
++  // Tracks whether the bar button that opened the panel is currently hovered.
++  void setHoverTriggerHovered(bool hovered);
++  void armHoverDismiss();
++  void cancelHoverDismiss();
+   void togglePanel(const std::string& panelId, PanelOpenRequest request);
+   // IPC-friendly overload: asks CompositorPlatform for preferred interactive output.
+   void togglePanel(const std::string& panelId);
+@@ -197,6 +204,10 @@ private:
+   void applyAttachedDecorationStyle();
+   // Submit a wl_region matching the panel body after applying the current reveal clip.
+   void applyPanelCompositorBlur(int bodyX, int bodyY, int bodyW, int bodyH, int clipX, int clipY, int clipW, int clipH);
++  // Pointer is over the panel surface (surface-local coordinates).
++  [[nodiscard]] bool panelSurfaceContains(float sx, float sy) const;
++  void applyPanelEnterHover(float sx, float sy);
++  void applyPanelMotionHover(float sx, float sy);
+ 
+   CompositorPlatform* m_platform = nullptr;
+   ConfigService* m_config = nullptr;
+@@ -265,6 +276,13 @@ private:
+   AttachedRevealDirection m_attachedRevealDirection = AttachedRevealDirection::Down;
+   AttachedRevealDirection m_detachedRevealDirection = AttachedRevealDirection::Down;
+   Timer m_keyboardRelaxTimer;
++  Timer m_hoverDismissTimer;
++  bool m_hoverDismissEnabled = false;
++  // Hover-dismiss state: the pointer counts as "on the panel" only after a
++  // motion event lands inside it. Enter alone is not trusted because Hyprland's
++  // focus grab can send a synthetic enter with (0,0) coordinates.
++  bool m_panelHovered = false;
++  bool m_triggerHovered = false;
+   std::string m_attachedBarPosition; // "top" / "bottom" / "left" / "right" while attached, empty otherwise
+   std::string m_sourceBarName;       // name of the bar that opened the current panel
+   std::optional<AttachedPanelGeometry> m_attachedPanelGeometry;
+diff --git a/src/shell/tray/tray_drawer_panel.cpp b/src/shell/tray/tray_drawer_panel.cpp
+index b41c8a4..29b7b68 100644
+--- a/src/shell/tray/tray_drawer_panel.cpp
++++ b/src/shell/tray/tray_drawer_panel.cpp
+@@ -119,6 +119,13 @@ void TrayDrawerPanel::create() {
+   setRoot(m_drawerWidget->releaseRoot());
+ }
+ 
++void TrayDrawerPanel::onOpen(std::string_view context) {
++  // The drawer closes by itself once the pointer leaves both the bar button
++  // and the panel, no matter how it was opened.
++  (void)context;
++  PanelManager::instance().setHoverDismiss(true);
++}
++
+ void TrayDrawerPanel::onClose() {
+   m_drawerWidget.reset();
+   clearReleasedRoot();
+diff --git a/src/shell/tray/tray_drawer_panel.h b/src/shell/tray/tray_drawer_panel.h
+index 4030d31..7ebcdae 100644
+--- a/src/shell/tray/tray_drawer_panel.h
++++ b/src/shell/tray/tray_drawer_panel.h
+@@ -4,6 +4,7 @@
+ 
+ #include <memory>
+ #include <string>
++#include <string_view>
+ #include <vector>
+ 
+ class ConfigService;
+@@ -16,6 +17,7 @@ public:
+   ~TrayDrawerPanel() override;
+ 
+   void create() override;
++  void onOpen(std::string_view context) override;
+   void onClose() override;
+ 
+   [[nodiscard]] float preferredWidth() const override;

@@ -1,0 +1,147 @@
+diff --git a/src/shell/bar/widgets/active_window_widget.cpp b/src/shell/bar/widgets/active_window_widget.cpp
+index 6d6c2dd..7b59fef 100644
+--- a/src/shell/bar/widgets/active_window_widget.cpp
++++ b/src/shell/bar/widgets/active_window_widget.cpp
+@@ -22,7 +22,7 @@ ActiveWindowWidget::ActiveWindowWidget(ConfigService& config, CompositorPlatform
+     : m_config(config), m_platform(platform), m_maxWidth(static_cast<float>(options.maxWidth)),
+       m_minWidth(static_cast<float>(options.minWidth)), m_iconSize(static_cast<float>(options.iconSize)),
+       m_titleScrollMode(options.titleScrollMode), m_displayMode(options.displayMode),
+-      m_showEmptyLabel(options.showEmptyLabel) {
++      m_showEmptyLabel(options.showEmptyLabel), m_showAppName(options.showAppName) {
+   buildDesktopIconIndex();
+ }
+ 
+@@ -166,6 +166,7 @@ void ActiveWindowWidget::syncState(Renderer& renderer) {
+ 
+   std::string identifier;
+   std::string title;
++  std::string rawTitle;
+   std::string appId;
+   bool emptyState = false;
+ 
+@@ -176,10 +177,18 @@ void ActiveWindowWidget::syncState(Renderer& renderer) {
+     emptyState = true;
+   } else {
+     identifier = current->identifier;
+-    title = StringUtils::windowTitleSingleLine(current->title);
++    rawTitle = StringUtils::windowTitleSingleLine(current->title);
++    title = rawTitle;
+     appId = current->appId;
+     if (title.empty()) {
+       title = appId;
++      rawTitle = title;
++    }
++    if (m_showAppName) {
++      const std::string appName = resolveAppName(appId);
++      if (!appName.empty()) {
++        title = appName;
++      }
+     }
+   }
+ 
+@@ -192,6 +201,7 @@ void ActiveWindowWidget::syncState(Renderer& renderer) {
+     m_iconColorizeRefreshPending = false;
+     m_lastIdentifier = std::move(identifier);
+     m_lastTitle = {};
++    m_lastRawTitle = {};
+     m_lastAppId = {};
+     m_lastEmptyState = emptyState;
+     m_lastIconPath = {};
+@@ -209,6 +219,7 @@ void ActiveWindowWidget::syncState(Renderer& renderer) {
+       && !desktopEntriesChanged
+       && identifier == m_lastIdentifier
+       && title == m_lastTitle
++      && rawTitle == m_lastRawTitle
+       && appId == m_lastAppId
+       && emptyState == m_lastEmptyState) {
+     return;
+@@ -217,10 +228,12 @@ void ActiveWindowWidget::syncState(Renderer& renderer) {
+ 
+   m_lastIdentifier = std::move(identifier);
+   m_lastTitle = title;
++  m_lastRawTitle = rawTitle;
+   m_lastAppId = appId;
+   m_lastEmptyState = emptyState;
+ 
+-  const std::string tooltipText = emptyState ? std::string{} : title;
++  // The tooltip keeps the full window title even when the bar shows the app name.
++  const std::string tooltipText = emptyState ? std::string{} : (rawTitle.empty() ? title : rawTitle);
+   if (tooltipText != m_lastTooltipTitle) {
+     m_lastTooltipTitle = tooltipText;
+     if (m_area != nullptr) {
+@@ -253,6 +266,24 @@ void ActiveWindowWidget::syncState(Renderer& renderer) {
+   requestUpdate();
+ }
+ 
++std::string ActiveWindowWidget::resolveAppName(const std::string& appId) {
++  if (appId.empty()) {
++    return {};
++  }
++
++  if (const auto internal = internal_apps::metadataForAppId(appId);
++      internal.has_value() && !internal->displayName.empty()) {
++    return internal->displayName;
++  }
++
++  if (const auto entry = app_identity::findDesktopEntry(appId, desktopEntries());
++      entry.has_value() && !entry->name.empty()) {
++    return entry->name;
++  }
++
++  return {};
++}
++
+ std::string ActiveWindowWidget::resolveIconPath(const std::string& appId) {
+   if (appId.empty()) {
+     return {};
+diff --git a/src/shell/bar/widgets/active_window_widget.h b/src/shell/bar/widgets/active_window_widget.h
+index 6077464..fb203c0 100644
+--- a/src/shell/bar/widgets/active_window_widget.h
++++ b/src/shell/bar/widgets/active_window_widget.h
+@@ -38,6 +38,8 @@ public:
+     ActiveWindowTitleScrollMode titleScrollMode = ActiveWindowTitleScrollMode::None;
+     ActiveWindowDisplayMode displayMode = ActiveWindowDisplayMode::IconAndText;
+     bool showEmptyLabel = false;
++    // Show the application's desktop name (e.g. "Brave") instead of the window title.
++    bool showAppName = false;
+   };
+ 
+   ActiveWindowWidget(ConfigService& config, CompositorPlatform& platform, Options options);
+@@ -51,6 +53,7 @@ private:
+   void syncWidgetVisibility(bool showWidget);
+   void syncState(Renderer& renderer);
+   [[nodiscard]] std::string resolveIconPath(const std::string& appId);
++  [[nodiscard]] std::string resolveAppName(const std::string& appId);
+   void buildDesktopIconIndex();
+ 
+   ConfigService& m_config;
+@@ -61,6 +64,7 @@ private:
+   ActiveWindowTitleScrollMode m_titleScrollMode = ActiveWindowTitleScrollMode::None;
+   ActiveWindowDisplayMode m_displayMode = ActiveWindowDisplayMode::IconAndText;
+   bool m_showEmptyLabel = false;
++  bool m_showAppName = false;
+   InputArea* m_area = nullptr;
+   Image* m_icon = nullptr;
+   Label* m_title = nullptr;
+@@ -71,6 +75,7 @@ private:
+ 
+   std::string m_lastIdentifier;
+   std::string m_lastTitle;
++  std::string m_lastRawTitle;
+   std::string m_lastAppId;
+   std::string m_lastIconPath;
+   std::string m_lastTooltipTitle;
+diff --git a/src/shell/bar/widgets/active_window_widget_definition.cpp b/src/shell/bar/widgets/active_window_widget_definition.cpp
+index 7484324..6f497f9 100644
+--- a/src/shell/bar/widgets/active_window_widget_definition.cpp
++++ b/src/shell/bar/widgets/active_window_widget_definition.cpp
+@@ -74,6 +74,9 @@ const noctalia::bar::WidgetDefinition<ActiveWindowWidget::Options>& activeWindow
+           field<&Options::showEmptyLabel>({
+               .key = "show_empty_label",
+           }),
++          field<&Options::showAppName>({
++              .key = "show_app_name",
++          }),
+       },
+   };
+   return definition;

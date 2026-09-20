@@ -13,6 +13,8 @@ Based on [emirbartu/noktadosyalari](https://github.com/emirbartu/noktadosyalari)
 - **starship** prompt in white/black with a terminal icon
 - **fastfetch** greeting with an animated CMD-style ASCII logo
 - **Noctalia media OSD**: the disc icon spins like a playing CD — see [`patches/`](patches/)
+- **Noctalia tray drawer**: background apps collapse into one icon; hovering it opens a small panel that closes itself when the pointer leaves — see [`patches/`](patches/)
+- **Noctalia active window**: the bar shows the app name (e.g. "Brave") instead of the long window title — see [`patches/`](patches/)
 - Custom **Hyprland scripts**: toggle internal monitor (game mode), touchpad toggle, auto monitor setup
 
 ## What's inside
