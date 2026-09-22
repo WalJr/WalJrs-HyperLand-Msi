@@ -2,6 +2,7 @@
 ui_scale = 1.20
 
 [bar.default]
+auto_hide = true
 center = [ "workspaces", "spacer_1", "active_window" ]
 concave_edge_corners = true
 end = [ "media", "spacer_1", "tray", "notifications", "network", "home", "volume", "session" ]
@@ -11,7 +12,9 @@ radius_bottom_left = 12
 radius_bottom_right = 12
 radius_top_left = 0
 radius_top_right = 0
+reserve_space = false
 scale = 1.10
+show_on_workspace_switch = false
 start = [ "launcher", "clock", "spacer_1", "group:g1" ]
 thickness = 35
 
