@@ -284,7 +284,7 @@ index 20fd7be..4d08e85 100644
    Signal<>::ScopedConnection m_appIconColorizeConn;
    Node* m_hoverOverlayParent = nullptr;
 diff --git a/src/shell/panel/panel_manager.cpp b/src/shell/panel/panel_manager.cpp
-index 72c65b8..a57a533 100644
+index 72c65b8..08416b4 100644
 --- a/src/shell/panel/panel_manager.cpp
 +++ b/src/shell/panel/panel_manager.cpp
 @@ -1337,6 +1337,7 @@ void PanelManager::closePanel(bool animateClose) {
@@ -295,7 +295,7 @@ index 72c65b8..a57a533 100644
  
    // Disable input during close animation
    m_inputDispatcher.setSceneRoot(nullptr);
-@@ -1380,6 +1381,74 @@ void PanelManager::closePanel(bool animateClose) {
+@@ -1380,6 +1381,88 @@ void PanelManager::closePanel(bool animateClose) {
    }
  }
  
@@ -313,6 +313,20 @@ index 72c65b8..a57a533 100644
 +  if (hovered) {
 +    cancelHoverDismiss();
 +  } else {
++    armHoverDismiss();
++  }
++}
++
++void PanelManager::pushHoverDismissBlocker() {
++  ++m_hoverDismissBlockers;
++  m_hoverDismissTimer.stop();
++}
++
++void PanelManager::popHoverDismissBlocker() {
++  if (m_hoverDismissBlockers > 0) {
++    --m_hoverDismissBlockers;
++  }
++  if (m_hoverDismissBlockers == 0 && m_hoverDismissEnabled && !m_panelHovered && !m_triggerHovered) {
 +    armHoverDismiss();
 +  }
 +}
@@ -352,7 +366,7 @@ index 72c65b8..a57a533 100644
 +}
 +
 +void PanelManager::armHoverDismiss() {
-+  if (!m_hoverDismissEnabled || !isOpen() || m_closing) {
++  if (!m_hoverDismissEnabled || !isOpen() || m_closing || m_hoverDismissBlockers > 0) {
 +    return;
 +  }
 +  // Grace period: closing is deferred so the pointer can travel between the
@@ -370,7 +384,7 @@ index 72c65b8..a57a533 100644
  void PanelManager::destroyPanel() {
    if (m_attachedToBar && m_attachedPanelGeometryCallback && m_output != nullptr) {
      m_attachedPanelGeometryCallback(m_output, m_sourceBarName, std::nullopt);
-@@ -1390,6 +1459,10 @@ void PanelManager::destroyPanel() {
+@@ -1390,6 +1473,11 @@ void PanelManager::destroyPanel() {
    m_animations.cancelAll();
    m_closing = false;
    m_pointerInside = false;
@@ -378,10 +392,11 @@ index 72c65b8..a57a533 100644
 +  m_hoverDismissEnabled = false;
 +  m_panelHovered = false;
 +  m_triggerHovered = false;
++  m_hoverDismissBlockers = 0;
    m_attachedPopupCount = 0;
    m_inputDispatcher.setSceneRoot(nullptr);
    // Hover leave only fades tooltips asynchronously. Destroy them (and any
-@@ -1516,6 +1589,20 @@ bool PanelManager::onPointerEvent(const PointerEvent& event) {
+@@ -1516,6 +1604,20 @@ bool PanelManager::onPointerEvent(const PointerEvent& event) {
      return true;
    }
    if (!isOpen() || m_inTransition) {
@@ -402,7 +417,7 @@ index 72c65b8..a57a533 100644
      return false;
    }
  
-@@ -1532,9 +1619,12 @@ bool PanelManager::onPointerEvent(const PointerEvent& event) {
+@@ -1532,9 +1634,12 @@ bool PanelManager::onPointerEvent(const PointerEvent& event) {
    if (m_attachedPopupCount > 0) {
      if (event.surface == m_wlSurface) {
        if (event.type == PointerEvent::Type::Enter) {
@@ -416,7 +431,7 @@ index 72c65b8..a57a533 100644
        }
      }
      return false;
-@@ -1543,7 +1633,10 @@ bool PanelManager::onPointerEvent(const PointerEvent& event) {
+@@ -1543,7 +1648,10 @@ bool PanelManager::onPointerEvent(const PointerEvent& event) {
    switch (event.type) {
    case PointerEvent::Type::Enter: {
      if (event.surface == m_wlSurface) {
@@ -428,7 +443,7 @@ index 72c65b8..a57a533 100644
        m_inputDispatcher.pointerEnter(static_cast<float>(event.sx), static_cast<float>(event.sy), event.serial);
      }
      break;
-@@ -1551,15 +1644,20 @@ bool PanelManager::onPointerEvent(const PointerEvent& event) {
+@@ -1551,15 +1659,20 @@ bool PanelManager::onPointerEvent(const PointerEvent& event) {
    case PointerEvent::Type::Leave: {
      if (event.surface == m_wlSurface) {
        m_pointerInside = false;
@@ -452,7 +467,7 @@ index 72c65b8..a57a533 100644
      break;
    }
    case PointerEvent::Type::Button: {
-@@ -1872,6 +1970,11 @@ void PanelManager::endAttachedPopup(wl_surface* surface) {
+@@ -1872,6 +1985,11 @@ void PanelManager::endAttachedPopup(wl_surface* surface) {
    if (m_attachedPopupCount > 0) {
      return;
    }
@@ -465,10 +480,10 @@ index 72c65b8..a57a533 100644
        m_platform != nullptr && m_platform->hasPointerPosition() && m_platform->lastPointerSurface() == m_wlSurface;
    if (m_pointerInside) {
 diff --git a/src/shell/panel/panel_manager.h b/src/shell/panel/panel_manager.h
-index b9b5c26..d1cdbc6 100644
+index b9b5c26..8a6d975 100644
 --- a/src/shell/panel/panel_manager.h
 +++ b/src/shell/panel/panel_manager.h
-@@ -99,6 +99,13 @@ public:
+@@ -99,6 +99,17 @@ public:
  
    void openPanel(const std::string& panelId, PanelOpenRequest request = {});
    void closePanel(bool animateClose = true);
@@ -477,12 +492,16 @@ index b9b5c26..d1cdbc6 100644
 +  void setHoverDismiss(bool enabled);
 +  // Tracks whether the bar button that opened the panel is currently hovered.
 +  void setHoverTriggerHovered(bool hovered);
++  // While at least one blocker is active, hover-dismiss is paused. Used by popups
++  // owned by other components (e.g. the tray context menu) that extend the panel.
++  void pushHoverDismissBlocker();
++  void popHoverDismissBlocker();
 +  void armHoverDismiss();
 +  void cancelHoverDismiss();
    void togglePanel(const std::string& panelId, PanelOpenRequest request);
    // IPC-friendly overload: asks CompositorPlatform for preferred interactive output.
    void togglePanel(const std::string& panelId);
-@@ -197,6 +204,10 @@ private:
+@@ -197,6 +208,10 @@ private:
    void applyAttachedDecorationStyle();
    // Submit a wl_region matching the panel body after applying the current reveal clip.
    void applyPanelCompositorBlur(int bodyX, int bodyY, int bodyW, int bodyH, int clipX, int clipY, int clipW, int clipH);
@@ -493,7 +512,7 @@ index b9b5c26..d1cdbc6 100644
  
    CompositorPlatform* m_platform = nullptr;
    ConfigService* m_config = nullptr;
-@@ -265,6 +276,13 @@ private:
+@@ -265,6 +280,14 @@ private:
    AttachedRevealDirection m_attachedRevealDirection = AttachedRevealDirection::Down;
    AttachedRevealDirection m_detachedRevealDirection = AttachedRevealDirection::Down;
    Timer m_keyboardRelaxTimer;
@@ -504,6 +523,7 @@ index b9b5c26..d1cdbc6 100644
 +  // focus grab can send a synthetic enter with (0,0) coordinates.
 +  bool m_panelHovered = false;
 +  bool m_triggerHovered = false;
++  int m_hoverDismissBlockers = 0;
    std::string m_attachedBarPosition; // "top" / "bottom" / "left" / "right" while attached, empty otherwise
    std::string m_sourceBarName;       // name of the bar that opened the current panel
    std::optional<AttachedPanelGeometry> m_attachedPanelGeometry;
@@ -545,3 +565,45 @@ index 4030d31..7ebcdae 100644
    void onClose() override;
  
    [[nodiscard]] float preferredWidth() const override;
+diff --git a/src/shell/tray/tray_menu.cpp b/src/shell/tray/tray_menu.cpp
+index 2c704f0..b77ba56 100644
+--- a/src/shell/tray/tray_menu.cpp
++++ b/src/shell/tray/tray_menu.cpp
+@@ -293,6 +293,11 @@ void TrayMenu::toggleForItem(const std::string& itemId, float contentScale) {
+   refreshEntries();
+ 
+   m_visible = true;
++  // Opened from the tray drawer panel: keep the panel open while the menu is up.
++  if (PanelManager::instance().isOpenPanel("tray-drawer")) {
++    PanelManager::instance().pushHoverDismissBlocker();
++    m_panelDismissBlockerActive = true;
++  }
+   ensureSurface();
+   if (m_instance == nullptr || m_instance->surface == nullptr) {
+     close();
+@@ -818,6 +823,10 @@ void TrayMenu::resizeMainSurfaceToEntries() {
+ }
+ 
+ void TrayMenu::destroySurface() {
++  if (m_panelDismissBlockerActive) {
++    m_panelDismissBlockerActive = false;
++    PanelManager::instance().popHoverDismissBlocker();
++  }
+   if (m_instance != nullptr) {
+     m_instance->inputDispatcher.setSceneRoot(nullptr);
+   }
+diff --git a/src/shell/tray/tray_menu.h b/src/shell/tray/tray_menu.h
+index a95b3a5..30ccf85 100644
+--- a/src/shell/tray/tray_menu.h
++++ b/src/shell/tray/tray_menu.h
+@@ -97,6 +97,10 @@ private:
+   wl_surface* m_keyboardBarWlSurface = nullptr;
+   float m_contentScale = 1.0F;
+   bool m_visible = false;
++  // The tray drawer panel pauses its hover-dismiss while this menu is open, so
++  // choosing an entry (e.g. "Exit Steam") is not interrupted by the panel
++  // closing and tearing the popup down.
++  bool m_panelDismissBlockerActive = false;
+   std::string m_lastClosedItemId;
+   std::chrono::steady_clock::time_point m_lastCloseTime;
+ 

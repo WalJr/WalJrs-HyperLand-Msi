@@ -20,8 +20,9 @@ Derlenen binary `~/.local/bin/noctalia` olarak kurulur ve sistem paketindeki sü
 Tepsi (tray) ikonlarını tek bir ok simgesinde toplar (`[widget.tray] drawer = true` ile birlikte).
 Fare simgenin üstüne gelince panel ~140 ms sonra açılır; fare ikondan veya panelden uzaklaşınca
 ~250 ms sonra kendiliğinden kapanır. Panel ister tıklamayla ister hover ile açılsın bu geçerli.
-Tıklama davranışı eskisi gibi aç/kapat olarak kalır.
-Noctalia **v5.1.0** kaynağına uygulanır (disc-spin yaması ile birlikte uygulanabilir).
+Bir tepsi ikonuna sağ tıklayıp açılan menü (ör. Steam → Exit Steam) açıkken panel kapanmaz;
+menü kapanınca normal davranışa döner. Tıklama davranışı eskisi gibi aç/kapat olarak kalır.
+Noctalia **v5.1.0** kaynağına uygulanır (diğer yamalarla birlikte uygulanabilir).
 
 ```sh
 git clone --depth 1 --branch v5.1.0 https://github.com/noctalia-dev/noctalia
